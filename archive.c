@@ -85,13 +85,15 @@ int create_archive(const char *out_path, int n, char *files[])
         uint64_t filesize;
         if (!file_exists_and_size(files[i], &filesize)) {
             fprintf(stderr, "Error: File '%s' does not exist or is inaccessible.\n", files[i]);
-            // fclose(out);
             return -1;
         }
-        FILE *out = fopen(out_path, "wb");
-        if (!out) return -1;
-        cwa_header_t h = {{'C','W','A','1'}, (uint32_t)n};
-        fwrite(&h, sizeof h, 1, out);
+    }
+
+    FILE *out = fopen(out_path, "wb");
+    if (!out) return -1;
+    cwa_header_t h = {{'C','W','A','1'}, (uint32_t)n};
+    fwrite(&h, sizeof h, 1, out);
+    for (int i = 0; i < n; ++i) {
         uint8_t *raw; uint64_t raw_sz;
         if (read_file(files[i], &raw, &raw_sz)) { fclose(out); return -1; }
         uint8_t *cmp; uint64_t cmp_sz;
@@ -101,8 +103,8 @@ int create_archive(const char *out_path, int n, char *files[])
         fwrite(files[i], 1, eh.filename_len, out);
         fwrite(cmp, 1, cmp_sz, out);
         free(raw); free(cmp);
-        fclose(out);
     }
+    fclose(out);
     return 0;
 }
 

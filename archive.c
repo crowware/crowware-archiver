@@ -1,12 +1,21 @@
 #include "archive.h"
 #include <stdio.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
+#include <inttypes.h>
+#include <sys/stat.h>
+
+static int file_exists_and_size(const char *path, uint64_t *size_out) {
+    struct stat st;
+    if (stat(path, &st) != 0) return 0;
+    *size_out = (uint64_t)st.st_size;
+    return 1;
+}
 
 static int compress_rle(const uint8_t *in, uint64_t in_sz, uint8_t **out, uint64_t *out_sz)
 {
-    if (!in || !out | !out_sz) return -1;
+    if (!in || !out || !out_sz) return -1;
     uint8_t *buf = malloc(in_sz * 2 + 1);
     if (!buf) return -1;
     uint64_t o = 0;
@@ -42,18 +51,20 @@ static int decompress_rle(const uint8_t *in, uint64_t in_sz, uint8_t **out, uint
 
 static int read_file(const char *p, uint8_t **b, uint64_t *s)
 {
+    struct stat st;
+    if (stat(p, &st) != 0) return -1;
+    uint64_t len = (uint64_t)st.st_size;
+
     FILE *f = fopen(p, "rb");
     if (!f) return -1;
-    fseek(f, 0, SEEK_END);
-    long len = ftell(f);
-    if (len < 0) { fclose(f); return -1; }
-    rewind(f);
+
     uint8_t *buf = malloc(len);
     if (!buf) { fclose(f); return -1; }
-    if (fread(buf, 1, len, f) != (size_t)len) { fclose(f); free(buf); return -1; }
+    if (fread(buf, 1, len, f) != len) { fclose(f); free(buf); return -1; }
     fclose(f);
+
     *b = buf;
-    *s = (uint64_t)len;    
+    *s = len;
     return 0;
 }
 
@@ -72,10 +83,17 @@ int create_archive(const char *out_path, int n, char *files[])
 {
     FILE *out = fopen(out_path, "wb");
     if (!out) return -1;
-    cwa_header_t h = {{'C', 'W', 'A', '1'}, (uint32_t)n};
+    cwa_header_t h = {{'C','W','A','1'}, (uint32_t)n};
     fwrite(&h, sizeof h, 1, out);
-    
+
     for (int i = 0; i < n; ++i) {
+        uint64_t filesize;
+        if (!file_exists_and_size(files[i], &filesize)) {
+            fprintf(stderr, "Error: File '%s' does not exist or is inaccessible.\n", files[i]);
+            fclose(out);
+            return -1;
+        }
+
         uint8_t *raw; uint64_t raw_sz;
         if (read_file(files[i], &raw, &raw_sz)) { fclose(out); return -1; }
         uint8_t *cmp; uint64_t cmp_sz;
@@ -102,7 +120,7 @@ int list_archive(const char *p)
         fread(name, 1, eh.filename_len, in);
         name[eh.filename_len] = 0;
         fseek(in, (long)eh.compressed_size, SEEK_CUR);
-        printf("%-30s %10llu bytes\n", name, (unsigned long long)eh.original_size);
+        printf("%-30s %10" PRIu64 " bytes\n", name, eh.original_size);
         free(name);
     }    
     fclose(in);
